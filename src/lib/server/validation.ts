@@ -145,6 +145,54 @@ export const skillInvocationCreateSchema = z.object({
 });
 export type SkillInvocationCreate = z.infer<typeof skillInvocationCreateSchema>;
 
+export const messageKindSchema = z.enum([
+	'feature_request',
+	'tool_update',
+	'access_request',
+	'problem_report',
+	'question',
+	'reply',
+	'note'
+]);
+
+export const messageAuthorSchema = z.enum(['hermes', 'user', 'claude']);
+
+export const messageStatusSchema = z.enum([
+	'open',
+	'acked',
+	'in_progress',
+	'resolved',
+	'wont_fix'
+]);
+
+export const messageSeveritySchema = z.enum(['critical', 'high', 'normal', 'low']);
+
+export const messageCreateSchema = z.object({
+	accountId: z.number().int().positive().nullish(),
+	kind: messageKindSchema,
+	author: messageAuthorSchema,
+	parentId: z.number().int().positive().nullish(),
+	subject: z.string().nullish(),
+	body: z.string().min(1),
+	status: messageStatusSchema.default('open'),
+	severity: messageSeveritySchema.default('normal'),
+	relatedSkill: z.string().nullish(),
+	relatedRepo: z.string().nullish(),
+	relatedCommitSha: z.string().nullish(),
+	tags: z.array(z.string()).nullish(),
+	metadata: z.unknown().nullish()
+});
+export type MessageCreate = z.infer<typeof messageCreateSchema>;
+
+export const messageUpdateSchema = z.object({
+	status: messageStatusSchema.optional(),
+	severity: messageSeveritySchema.optional(),
+	relatedCommitSha: z.string().nullish().optional(),
+	relatedSkill: z.string().nullish().optional(),
+	tags: z.array(z.string()).nullish().optional()
+});
+export type MessageUpdate = z.infer<typeof messageUpdateSchema>;
+
 export const accountUpsertSchema = z.object({
 	name: z.string().min(1).default('default'),
 	mode: z.enum(['paper', 'live']).default('paper'),

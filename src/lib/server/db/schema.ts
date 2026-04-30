@@ -10,6 +10,8 @@
  *  - pnl_snapshots           : hourly mark-to-market snapshots
  *  - agent_decisions         : every sub-agent decision with input/output/rationale
  *  - skill_invocations       : per-skill run latency + success metrics
+ *  - agent_messages          : two-way message inbox between Hermes, the user, and Claude
+ *                              (feature requests, problem reports, replies, resolutions)
  *
  * Money columns:
  *  - USD-quantity columns -> numeric(20, 8) (8dp = 1e-8 cent precision; comfortable for fiat)
@@ -78,6 +80,33 @@ export const subAgentEnum = pgEnum('sub_agent', [
 	'macro_analyst',
 	'risk_manager',
 	'execution_agent'
+]);
+
+export const messageKindEnum = pgEnum('message_kind', [
+	'feature_request', // Hermes wants new tool or behavior
+	'tool_update', // Hermes wants existing tool changed
+	'access_request', // Hermes needs new credential / scope
+	'problem_report', // Something broke
+	'question', // Hermes wants clarification
+	'reply', // Threaded reply (any author)
+	'note' // Free-form
+]);
+
+export const messageAuthorEnum = pgEnum('message_author', ['hermes', 'user', 'claude']);
+
+export const messageStatusEnum = pgEnum('message_status', [
+	'open', // newly filed; awaiting human read
+	'acked', // human has read it
+	'in_progress', // someone is working on it
+	'resolved', // shipped (related_commit_sha populated when code was the answer)
+	'wont_fix' // declined
+]);
+
+export const messageSeverityEnum = pgEnum('message_severity', [
+	'critical',
+	'high',
+	'normal',
+	'low'
 ]);
 
 // ----- ACCOUNTS -------------------------------------------------------------
@@ -396,6 +425,52 @@ export const skillInvocations = pgTable(
 	]
 );
 
+// ----- AGENT MESSAGES (two-way inbox) ---------------------------------------
+
+export const agentMessages = pgTable(
+	'agent_messages',
+	{
+		id: bigserial('id', { mode: 'number' }).primaryKey(),
+		accountId: integer('account_id'), // optional — system-wide messages don't need one
+
+		kind: messageKindEnum('kind').notNull(),
+		author: messageAuthorEnum('author').notNull(),
+
+		// Threading: replies set parentId to the top-level message they reply to.
+		// Top-level messages have parentId = NULL.
+		parentId: integer('parent_id'),
+
+		subject: text('subject'), // one-line summary (top-level only, typically)
+		body: text('body').notNull(), // markdown allowed
+
+		status: messageStatusEnum('status').notNull().default('open'),
+		severity: messageSeverityEnum('severity').notNull().default('normal'),
+
+		// Optional context
+		relatedSkill: text('related_skill'),
+		relatedRepo: text('related_repo'), // 'wings' | 'wings-web' | etc.
+		relatedCommitSha: text('related_commit_sha'), // populated when resolved by code
+
+		// Free-form
+		tags: text('tags').array(),
+		metadata: jsonb('metadata'),
+
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`now()`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`now()`),
+		resolvedAt: timestamp('resolved_at', { withTimezone: true, mode: 'date' })
+	},
+	(t) => [
+		index('agent_messages_status_idx').on(t.status, t.createdAt),
+		index('agent_messages_thread_idx').on(t.parentId),
+		index('agent_messages_author_idx').on(t.author, t.createdAt),
+		index('agent_messages_kind_idx').on(t.kind, t.createdAt)
+	]
+);
+
 // ----- TYPE EXPORTS ---------------------------------------------------------
 
 export type Account = typeof accounts.$inferSelect;
@@ -414,3 +489,5 @@ export type AgentDecision = typeof agentDecisions.$inferSelect;
 export type NewAgentDecision = typeof agentDecisions.$inferInsert;
 export type SkillInvocation = typeof skillInvocations.$inferSelect;
 export type NewSkillInvocation = typeof skillInvocations.$inferInsert;
+export type AgentMessage = typeof agentMessages.$inferSelect;
+export type NewAgentMessage = typeof agentMessages.$inferInsert;
