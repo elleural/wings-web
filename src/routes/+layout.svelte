@@ -12,7 +12,10 @@
 		{ href: '/positions', label: 'positions' },
 		{ href: '/decisions', label: 'decisions' },
 		{ href: '/fills', label: 'fills' },
+		{ href: '/strategies', label: 'strategies' },
 		{ href: '/performance', label: 'performance' },
+		{ href: '/risk', label: 'risk' },
+		{ href: '/costs', label: 'costs' },
 		{ href: '/messages', label: 'messages' }
 	];
 </script>
