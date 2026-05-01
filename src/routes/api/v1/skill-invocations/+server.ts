@@ -21,6 +21,8 @@ export async function POST({ request }) {
 			success: body.success,
 			errorMessage: body.errorMessage ?? null,
 			llmCostUsd: body.llmCostUsd ?? null,
+			llmComputeSeconds: body.llmComputeSeconds ?? null,
+			llmModel: body.llmModel ?? null,
 			shadow: body.shadow,
 			invokedAt
 		})

@@ -26,6 +26,8 @@ export async function POST({ request }) {
 			llmTokensIn: body.llmTokensIn ?? null,
 			llmTokensOut: body.llmTokensOut ?? null,
 			llmCostUsd: body.llmCostUsd ?? null,
+			llmComputeSeconds: body.llmComputeSeconds ?? null,
+			llmModel: body.llmModel ?? null,
 			decidedAt
 		})
 		.returning();

@@ -111,6 +111,8 @@ export const decisionCreateSchema = z.object({
 	llmTokensIn: z.number().int().nonnegative().nullish(),
 	llmTokensOut: z.number().int().nonnegative().nullish(),
 	llmCostUsd: decimalString.nullish(),
+	llmComputeSeconds: decimalString.nullish(),
+	llmModel: z.string().nullish(),
 	decidedAt: isoDate.nullish()
 });
 export type DecisionCreate = z.infer<typeof decisionCreateSchema>;
@@ -140,6 +142,8 @@ export const skillInvocationCreateSchema = z.object({
 	success: z.boolean().default(true),
 	errorMessage: z.string().nullish(),
 	llmCostUsd: decimalString.nullish(),
+	llmComputeSeconds: decimalString.nullish(),
+	llmModel: z.string().nullish(),
 	shadow: z.boolean().default(false),
 	invokedAt: isoDate.nullish()
 });

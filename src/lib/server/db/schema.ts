@@ -381,6 +381,10 @@ export const agentDecisions = pgTable(
 		llmTokensIn: integer('llm_tokens_in'),
 		llmTokensOut: integer('llm_tokens_out'),
 		llmCostUsd: numeric('llm_cost_usd', { precision: 20, scale: 8 }),
+		// Wall-clock seconds of inference. Primary cost signal under local-Ollama
+		// architecture; llmCostUsd stays for any rare fallback API calls.
+		llmComputeSeconds: numeric('llm_compute_seconds', { precision: 12, scale: 4 }),
+		llmModel: text('llm_model'), // e.g. 'ollama:hermes3:8b'
 
 		decidedAt: timestamp('decided_at', { withTimezone: true, mode: 'date' })
 			.notNull()
@@ -411,6 +415,9 @@ export const skillInvocations = pgTable(
 
 		// Optional: aggregated per-invocation cost
 		llmCostUsd: numeric('llm_cost_usd', { precision: 20, scale: 8 }),
+		// Wall-clock inference seconds aggregated across the skill's run
+		llmComputeSeconds: numeric('llm_compute_seconds', { precision: 12, scale: 4 }),
+		llmModel: text('llm_model'),
 
 		// Was this a shadow-mode A/B run?
 		shadow: boolean('shadow').notNull().default(false),

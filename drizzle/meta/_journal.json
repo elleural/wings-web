@@ -15,6 +15,13 @@
       "when": 1777543902502,
       "tag": "0001_modern_blizzard",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777577213624,
+      "tag": "0002_wandering_polaris",
+      "breakpoints": true
     }
   ]
 }
