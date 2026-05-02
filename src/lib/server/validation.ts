@@ -159,7 +159,8 @@ export const messageKindSchema = z.enum([
 	'note'
 ]);
 
-export const messageAuthorSchema = z.enum(['hermes', 'user', 'claude']);
+export const messageAuthorSchema = z.enum(['hermes', 'copycat', 'user', 'claude']);
+export const agentSourceSchema = z.enum(['hermes', 'copycat']);
 
 export const messageStatusSchema = z.enum([
 	'open',
@@ -180,6 +181,7 @@ export const messageCreateSchema = z.object({
 	body: z.string().min(1),
 	status: messageStatusSchema.default('open'),
 	severity: messageSeveritySchema.default('normal'),
+	source: agentSourceSchema.default('hermes'),
 	relatedSkill: z.string().nullish(),
 	relatedRepo: z.string().nullish(),
 	relatedCommitSha: z.string().nullish(),
@@ -196,6 +198,92 @@ export const messageUpdateSchema = z.object({
 	tags: z.array(z.string()).nullish().optional()
 });
 export type MessageUpdate = z.infer<typeof messageUpdateSchema>;
+
+// ----- copycat schemas -------------------------------------------------------
+
+const decimalString = z.string().regex(/^-?\d+(\.\d+)?$/, 'Must be a decimal string like "12.345"');
+
+export const heartbeatCreateSchema = z.object({
+	source: agentSourceSchema.default('copycat'),
+	host: z.string().min(1),
+	mode: z.enum(['paper', 'live', 'paused']).default('paper'),
+	memUsedMb: z.number().int().nonnegative().nullish(),
+	ollamaModelResident: z.string().nullish(),
+	watcherLagMs: z.number().int().nonnegative().nullish(),
+	metadata: z.unknown().nullish()
+});
+export type HeartbeatCreate = z.infer<typeof heartbeatCreateSchema>;
+
+export const minedTradeCreateSchema = z.object({
+	signature: z.string().min(1),
+	slot: z.number().int().nonnegative(),
+	sender: z.string().min(1),
+	profitUsd: z.string(),
+	holdSeconds: z.number().int().nonnegative().default(0),
+	capitalInUsd: z.string(),
+	programs: z.array(z.string()),
+	tradeTypeId: z.number().int().positive().nullish(),
+	rawData: z.unknown().nullish()
+});
+export type MinedTradeCreate = z.infer<typeof minedTradeCreateSchema>;
+
+export const tradeTypeCreateSchema = z.object({
+	name: z.string().min(1),
+	version: z.number().int().nonnegative().default(0),
+	description: z.string().nullish(),
+	exemplarSignatures: z.array(z.string()).nullish()
+});
+export type TradeTypeCreate = z.infer<typeof tradeTypeCreateSchema>;
+
+export const tradeTypeUpdateSchema = z.object({
+	replayPassRate: z.string().nullish(),
+	replayGated: z.boolean().nullish()
+});
+export type TradeTypeUpdate = z.infer<typeof tradeTypeUpdateSchema>;
+
+export const programCreateSchema = z.object({
+	programId: z.string().min(1),
+	name: z.string().min(1),
+	type: z.string().min(1),
+	verified: z.boolean().default(false),
+	ottersecRepoUrl: z.string().nullish(),
+	sourceAuditStatus: z.string().default('pending')
+});
+export type ProgramCreate = z.infer<typeof programCreateSchema>;
+
+export const programUpdateSchema = z.object({
+	sourceAuditStatus: z.string().nullish(),
+	blocked: z.boolean().nullish(),
+	verified: z.boolean().nullish(),
+	ottersecRepoUrl: z.string().nullish()
+});
+export type ProgramUpdate = z.infer<typeof programUpdateSchema>;
+
+export const replayProofCreateSchema = z.object({
+	minedTradeId: z.number().int().positive(),
+	slot: z.number().int().nonnegative(),
+	status: z.enum(['pass', 'fail', 'timeout']),
+	balanceDeltaMatch: z.boolean(),
+	lamportToleranceUsed: z.number().int().nonnegative().default(0),
+	failureHypothesis: z.string().nullish()
+});
+export type ReplayProofCreate = z.infer<typeof replayProofCreateSchema>;
+
+export const candidateEventCreateSchema = z.object({
+	tradeTypeId: z.number().int().positive(),
+	programId: z.string().min(1),
+	assetMint: z.string().nullish(),
+	idempotencyKey: z.string().min(1),
+	ttlMs: z.number().int().nonnegative().default(5000),
+	rawEvent: z.unknown().nullish()
+});
+export type CandidateEventCreate = z.infer<typeof candidateEventCreateSchema>;
+
+export const candidateEventUpdateSchema = z.object({
+	status: z.enum(['pending', 'decided', 'expired']),
+	decisionId: z.number().int().positive().nullish()
+});
+export type CandidateEventUpdate = z.infer<typeof candidateEventUpdateSchema>;
 
 export const accountUpsertSchema = z.object({
 	name: z.string().min(1).default('default'),

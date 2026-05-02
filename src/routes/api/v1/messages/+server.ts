@@ -21,6 +21,7 @@ export async function POST({ request }) {
 			accountId: body.accountId ?? null,
 			kind: body.kind,
 			author: body.author,
+			source: body.source ?? 'hermes',
 			parentId: body.parentId ?? null,
 			subject: body.subject ?? null,
 			body: body.body,
@@ -41,6 +42,7 @@ export async function GET({ url }) {
 	const status = url.searchParams.get('status');
 	const author = url.searchParams.get('author');
 	const kind = url.searchParams.get('kind');
+	const source = url.searchParams.get('source');
 	const parentId = url.searchParams.get('parentId');
 	const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '100', 10) || 100, 500);
 
@@ -48,6 +50,7 @@ export async function GET({ url }) {
 	if (status) conditions.push(eq(schema.agentMessages.status, status as never));
 	if (author) conditions.push(eq(schema.agentMessages.author, author as never));
 	if (kind) conditions.push(eq(schema.agentMessages.kind, kind as never));
+	if (source) conditions.push(eq(schema.agentMessages.source, source as never));
 	if (parentId === 'null') {
 		// Top-level only — no parent.
 		// Drizzle: use IS NULL via sql helper.

@@ -21,6 +21,7 @@
 
 import { sql } from 'drizzle-orm';
 import {
+	bigint,
 	bigserial,
 	boolean,
 	index,
@@ -36,7 +37,8 @@ import {
 
 // ----- ENUMS ----------------------------------------------------------------
 
-export const tradingModeEnum = pgEnum('trading_mode', ['paper', 'live']);
+export const tradingModeEnum = pgEnum('trading_mode', ['paper', 'live', 'paused']);
+export const agentSourceEnum = pgEnum('agent_source', ['hermes', 'copycat']);
 
 export const venueEnum = pgEnum('venue', [
 	'polymarket',
@@ -92,7 +94,7 @@ export const messageKindEnum = pgEnum('message_kind', [
 	'note' // Free-form
 ]);
 
-export const messageAuthorEnum = pgEnum('message_author', ['hermes', 'user', 'claude']);
+export const messageAuthorEnum = pgEnum('message_author', ['hermes', 'copycat', 'user', 'claude']);
 
 export const messageStatusEnum = pgEnum('message_status', [
 	'open', // newly filed; awaiting human read
@@ -369,6 +371,9 @@ export const agentDecisions = pgTable(
 		output: jsonb('output'),
 		rationale: text('rationale'),
 
+		// Source project (hermes or copycat)
+		source: agentSourceEnum('source').notNull().default('hermes'),
+
 		// Linkage to the order/position it produced (if any)
 		orderId: integer('order_id'),
 		positionId: integer('position_id'),
@@ -443,6 +448,9 @@ export const agentMessages = pgTable(
 		kind: messageKindEnum('kind').notNull(),
 		author: messageAuthorEnum('author').notNull(),
 
+		// Source project (hermes or copycat)
+		source: agentSourceEnum('source').notNull().default('hermes'),
+
 		// Threading: replies set parentId to the top-level message they reply to.
 		// Top-level messages have parentId = NULL.
 		parentId: integer('parent_id'),
@@ -478,6 +486,140 @@ export const agentMessages = pgTable(
 	]
 );
 
+// ----- COPYCAT TABLES -------------------------------------------------------
+
+export const replayStatusEnum = pgEnum('replay_status', ['pass', 'fail', 'timeout']);
+export const candidateEventStatusEnum = pgEnum('candidate_event_status', ['pending', 'decided', 'expired']);
+export const supervisorModeEnum = pgEnum('supervisor_mode', ['paper', 'live', 'paused']);
+
+export const minedTrades = pgTable(
+	'mined_trades',
+	{
+		id: bigserial('id', { mode: 'number' }).primaryKey(),
+		signature: text('signature').notNull(),
+		slot: bigint('slot', { mode: 'number' }).notNull(),
+		sender: text('sender').notNull(),
+		profitUsd: numeric('profit_usd', { precision: 20, scale: 8 }).notNull(),
+		holdSeconds: integer('hold_seconds').notNull().default(0),
+		capitalInUsd: numeric('capital_in_usd', { precision: 20, scale: 8 }).notNull(),
+		programs: text('programs').array().notNull(),
+		tradeTypeId: integer('trade_type_id'),
+		rawData: jsonb('raw_data'),
+		classifiedAt: timestamp('classified_at', { withTimezone: true, mode: 'date' }),
+		minedAt: timestamp('mined_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`now()`)
+	},
+	(t) => [
+		uniqueIndex('mined_trades_signature_unique').on(t.signature),
+		index('mined_trades_type_idx').on(t.tradeTypeId),
+		index('mined_trades_profit_idx').on(t.profitUsd),
+		index('mined_trades_slot_idx').on(t.slot)
+	]
+);
+
+export const tradeTaxonomy = pgTable(
+	'trade_taxonomy',
+	{
+		id: bigserial('id', { mode: 'number' }).primaryKey(),
+		name: text('name').notNull(),
+		version: integer('version').notNull().default(0),
+		description: text('description'),
+		exemplarSignatures: text('exemplar_signatures').array(),
+		replayPassRate: numeric('replay_pass_rate', { precision: 5, scale: 4 }),
+		replayGated: boolean('replay_gated').notNull().default(false),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`now()`)
+	},
+	(t) => [uniqueIndex('trade_taxonomy_name_version_unique').on(t.name, t.version)]
+);
+
+export const programTaxonomy = pgTable(
+	'program_taxonomy',
+	{
+		id: bigserial('id', { mode: 'number' }).primaryKey(),
+		name: text('name').notNull(),
+		programId: text('program_id').notNull(),
+		type: text('type').notNull(),
+		verified: boolean('verified').notNull().default(false),
+		ottersecRepoUrl: text('ottersec_repo_url'),
+		sourceAuditStatus: text('source_audit_status').notNull().default('pending'),
+		blocked: boolean('blocked').notNull().default(false),
+		lastSeenAt: timestamp('last_seen_at', { withTimezone: true, mode: 'date' }),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`now()`)
+	},
+	(t) => [uniqueIndex('program_taxonomy_program_id_unique').on(t.programId)]
+);
+
+export const replayProofs = pgTable(
+	'replay_proofs',
+	{
+		id: bigserial('id', { mode: 'number' }).primaryKey(),
+		minedTradeId: integer('mined_trade_id').notNull(),
+		slot: bigint('slot', { mode: 'number' }).notNull(),
+		status: replayStatusEnum('status').notNull(),
+		balanceDeltaMatch: boolean('balance_delta_match').notNull().default(false),
+		lamportToleranceUsed: bigint('lamport_tolerance_used', { mode: 'number' })
+			.notNull()
+			.default(0),
+		failureHypothesis: text('failure_hypothesis'),
+		ranAt: timestamp('ran_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`now()`)
+	},
+	(t) => [
+		index('replay_proofs_trade_idx').on(t.minedTradeId),
+		index('replay_proofs_status_idx').on(t.status, t.ranAt)
+	]
+);
+
+export const candidateEvents = pgTable(
+	'candidate_events',
+	{
+		id: bigserial('id', { mode: 'number' }).primaryKey(),
+		tradeTypeId: integer('trade_type_id').notNull(),
+		programId: text('program_id').notNull(),
+		assetMint: text('asset_mint'),
+		idempotencyKey: text('idempotency_key').notNull(),
+		firedAt: timestamp('fired_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`now()`),
+		ttlMs: integer('ttl_ms').notNull().default(5000),
+		status: candidateEventStatusEnum('status').notNull().default('pending'),
+		decisionId: integer('decision_id'),
+		rawEvent: jsonb('raw_event'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`now()`)
+	},
+	(t) => [
+		uniqueIndex('candidate_events_idempotency_key_unique').on(t.idempotencyKey),
+		index('candidate_events_status_idx').on(t.status, t.firedAt),
+		index('candidate_events_type_idx').on(t.tradeTypeId, t.firedAt)
+	]
+);
+
+export const heartbeats = pgTable(
+	'heartbeats',
+	{
+		id: bigserial('id', { mode: 'number' }).primaryKey(),
+		source: agentSourceEnum('source').notNull(),
+		host: text('host').notNull(),
+		ts: timestamp('ts', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`now()`),
+		mode: supervisorModeEnum('mode').notNull().default('paper'),
+		memUsedMb: integer('mem_used_mb'),
+		ollamaModelResident: text('ollama_model_resident'),
+		watcherLagMs: integer('watcher_lag_ms'),
+		metadata: jsonb('metadata')
+	},
+	(t) => [index('heartbeats_source_ts_idx').on(t.source, t.ts)]
+);
+
 // ----- TYPE EXPORTS ---------------------------------------------------------
 
 export type Account = typeof accounts.$inferSelect;
@@ -498,3 +640,15 @@ export type SkillInvocation = typeof skillInvocations.$inferSelect;
 export type NewSkillInvocation = typeof skillInvocations.$inferInsert;
 export type AgentMessage = typeof agentMessages.$inferSelect;
 export type NewAgentMessage = typeof agentMessages.$inferInsert;
+export type MinedTrade = typeof minedTrades.$inferSelect;
+export type NewMinedTrade = typeof minedTrades.$inferInsert;
+export type TradeType = typeof tradeTaxonomy.$inferSelect;
+export type NewTradeType = typeof tradeTaxonomy.$inferInsert;
+export type ProgramEntry = typeof programTaxonomy.$inferSelect;
+export type NewProgramEntry = typeof programTaxonomy.$inferInsert;
+export type ReplayProof = typeof replayProofs.$inferSelect;
+export type NewReplayProof = typeof replayProofs.$inferInsert;
+export type CandidateEvent = typeof candidateEvents.$inferSelect;
+export type NewCandidateEvent = typeof candidateEvents.$inferInsert;
+export type Heartbeat = typeof heartbeats.$inferSelect;
+export type NewHeartbeat = typeof heartbeats.$inferInsert;
