@@ -201,8 +201,6 @@ export type MessageUpdate = z.infer<typeof messageUpdateSchema>;
 
 // ----- copycat schemas -------------------------------------------------------
 
-const decimalString = z.string().regex(/^-?\d+(\.\d+)?$/, 'Must be a decimal string like "12.345"');
-
 export const heartbeatCreateSchema = z.object({
 	source: agentSourceSchema.default('copycat'),
 	host: z.string().min(1),
