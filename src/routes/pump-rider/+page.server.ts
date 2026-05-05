@@ -24,6 +24,7 @@ interface DailyRow {
 	peak_drop: number | string;
 	stop_loss: number | string;
 	max_hold: number | string;
+	drain: number | string;
 	pnl_lamports: number | string;
 	entry_lamports: number | string;
 	net_pnl_lamports: number | string;
@@ -34,6 +35,7 @@ interface AllTimeRow {
 	wins: number | string;
 	losses: number | string;
 	pnl_lamports: number | string;
+	net_pnl_lamports: number | string;
 	loser_avg_lamports: number | string;
 	worst_lamports: number | string;
 }
@@ -53,44 +55,74 @@ export const load: PageServerLoad = async () => {
 				.where(eq(schema.pumpRiderPositions.status, 'closed'))
 				.orderBy(desc(schema.pumpRiderPositions.closedAt))
 				.limit(50),
-			// 14-day daily breakdown with fee-adjusted P&L
+			// 14-day daily breakdown with fee-adjusted P&L. Drain trades
+			// (no exit quote) realize full loss; only entry fee paid.
 			db.execute(sql`
+				WITH realized AS (
+					SELECT
+						DATE(opened_at) AS day,
+						entry_sol_lamports,
+						pnl_lamports,
+						exit_reason,
+						CASE WHEN pnl_lamports IS NOT NULL THEN pnl_lamports
+						     ELSE -entry_sol_lamports END AS realized_pnl_lamports
+					FROM pump_rider_positions
+					WHERE status = 'closed'
+					  AND opened_at >= now() - interval '14 days'
+				)
 				SELECT
-					DATE(opened_at) AS day,
+					day,
 					count(*)::int AS n_trades,
-					(count(*) FILTER (WHERE pnl_lamports > 0))::int AS wins,
-					(count(*) FILTER (WHERE pnl_lamports < 0))::int AS losses,
-					(count(*) FILTER (WHERE exit_reason = 'tp_fired'))::int AS tp_fired,
+					(count(*) FILTER (WHERE realized_pnl_lamports > 0))::int AS wins,
+					(count(*) FILTER (WHERE realized_pnl_lamports < 0))::int AS losses,
+					(count(*) FILTER (WHERE exit_reason = 'take_profit_fast'))::int AS tp_fired,
 					(count(*) FILTER (WHERE exit_reason = 'peak_drop'))::int AS peak_drop,
 					(count(*) FILTER (WHERE exit_reason = 'stop_loss'))::int AS stop_loss,
 					(count(*) FILTER (WHERE exit_reason = 'max_hold'))::int AS max_hold,
-					COALESCE(SUM(pnl_lamports), 0)::bigint AS pnl_lamports,
+					(count(*) FILTER (WHERE exit_reason = 'drain_detected'))::int AS drain,
+					COALESCE(SUM(realized_pnl_lamports), 0)::bigint AS pnl_lamports,
 					COALESCE(SUM(entry_sol_lamports), 0)::bigint AS entry_lamports,
-					-- Fee-adjusted: pnl - fee_in - fee_out (each 1% per leg)
+					-- Net: realized - entry fee - (exit fee iff sell quote existed)
 					COALESCE(SUM(
-						pnl_lamports
+						realized_pnl_lamports
 						- (entry_sol_lamports * ${PUMPFUN_FEE_BPS} / 10000)::bigint
-						- ((entry_sol_lamports + COALESCE(pnl_lamports, 0)) * ${PUMPFUN_FEE_BPS} / 10000)::bigint
+						- CASE WHEN pnl_lamports IS NULL THEN 0
+						       ELSE ((entry_sol_lamports + pnl_lamports) * ${PUMPFUN_FEE_BPS} / 10000)::bigint END
 					), 0)::bigint AS net_pnl_lamports
-				FROM pump_rider_positions
-				WHERE status = 'closed'
-				  AND opened_at >= now() - interval '14 days'
-				GROUP BY DATE(opened_at)
+				FROM realized
+				GROUP BY day
 				ORDER BY day DESC
-			`)
+			`),
 		]);
 
-		// Aggregate stats
+		// Aggregate stats — uses the same realized_pnl_lamports expression
+		// as the daily breakdown so the top-card and daily rows reconcile.
+		// "Realized" PnL: drain/no-quote closes count as full loss (-entry).
 		const allTimeAgg = await db.execute(sql`
+			WITH realized AS (
+				SELECT
+					CASE WHEN pnl_lamports IS NOT NULL THEN pnl_lamports
+					     ELSE -entry_sol_lamports END AS realized_pnl_lamports,
+					entry_sol_lamports
+				FROM pump_rider_positions
+				WHERE status = 'closed'
+			)
 			SELECT
 				count(*)::int AS total,
-				(count(*) FILTER (WHERE pnl_lamports > 0))::int AS wins,
-				(count(*) FILTER (WHERE pnl_lamports < 0))::int AS losses,
-				COALESCE(SUM(pnl_lamports), 0)::bigint AS pnl_lamports,
-				COALESCE(AVG(pnl_lamports) FILTER (WHERE pnl_lamports < 0), 0)::bigint AS loser_avg_lamports,
-				COALESCE(MIN(pnl_lamports), 0)::bigint AS worst_lamports
-			FROM pump_rider_positions
-			WHERE status = 'closed'
+				(count(*) FILTER (WHERE realized_pnl_lamports > 0))::int AS wins,
+				(count(*) FILTER (WHERE realized_pnl_lamports < 0))::int AS losses,
+				COALESCE(SUM(realized_pnl_lamports), 0)::bigint AS pnl_lamports,
+				-- Net = realized - fees. Entry fee always paid; exit fee only
+				-- when exit quote existed (== pnl_lamports IS NOT NULL).
+				COALESCE(SUM(
+					realized_pnl_lamports
+					- (entry_sol_lamports * ${PUMPFUN_FEE_BPS} / 10000)::bigint
+					- CASE WHEN realized_pnl_lamports = -entry_sol_lamports THEN 0
+					       ELSE ((entry_sol_lamports + realized_pnl_lamports) * ${PUMPFUN_FEE_BPS} / 10000)::bigint END
+				), 0)::bigint AS net_pnl_lamports,
+				COALESCE(AVG(realized_pnl_lamports) FILTER (WHERE realized_pnl_lamports < 0), 0)::bigint AS loser_avg_lamports,
+				COALESCE(MIN(realized_pnl_lamports), 0)::bigint AS worst_lamports
+			FROM realized
 		`);
 
 		const daily = ((dailyRows as unknown as { rows?: unknown[] }).rows ?? []) as DailyRow[];

@@ -51,18 +51,35 @@
 
 	const PUMPFUN_FEE_BPS = 100; // 1% per swap
 
-	function feeUsdFor(entryLp: number | null | undefined, pnlLp: number | null | undefined): number {
+	function feeUsdFor(
+		entryLp: number | null | undefined,
+		pnlLp: number | null | undefined,
+		hasExitQuote: boolean
+	): number {
 		const e = Number(entryLp ?? 0);
 		const p = Number(pnlLp ?? 0);
 		if (!Number.isFinite(e) || e <= 0) return 0;
-		// Fee on entry + fee on exit (which is entry+pnl).
-		const feeLp = (e * PUMPFUN_FEE_BPS) / 10000 + ((e + p) * PUMPFUN_FEE_BPS) / 10000;
-		return (feeLp / 1e9) * data.solUsd;
+		// Entry fee always paid. Exit fee only if we actually got a sell quote;
+		// drain_detected closes have no exit-side swap so no exit fee.
+		const entryFeeLp = (e * PUMPFUN_FEE_BPS) / 10000;
+		const exitFeeLp = hasExitQuote ? ((e + p) * PUMPFUN_FEE_BPS) / 10000 : 0;
+		return ((entryFeeLp + exitFeeLp) / 1e9) * data.solUsd;
 	}
-	function netUsdFor(entryLp: number | null | undefined, pnlLp: number | null | undefined): number {
+	function netUsdFor(
+		entryLp: number | null | undefined,
+		pnlLp: number | null | undefined,
+		hasExitQuote: boolean
+	): number {
+		const e = Number(entryLp ?? 0);
+		// drain_detected and similar: we hold worthless tokens; realistic
+		// loss = full entry minus the entry fee already paid.
+		if (!hasExitQuote) {
+			const lossUsd = -(e / 1e9) * data.solUsd;
+			return lossUsd - feeUsdFor(entryLp, 0, false);
+		}
 		const p = Number(pnlLp ?? 0);
 		const grossUsd = (p / 1e9) * data.solUsd;
-		return grossUsd - feeUsdFor(entryLp, pnlLp);
+		return grossUsd - feeUsdFor(entryLp, pnlLp, true);
 	}
 	function exitLpFor(entryLp: number | null | undefined, pnlLp: number | null | undefined): number {
 		return Number(entryLp ?? 0) + Number(pnlLp ?? 0);
@@ -106,11 +123,14 @@
 		<div class="text-xs text-(--color-fg-muted) mt-1">target: 90%</div>
 	</div>
 	<div class="rounded-md border border-(--color-border) bg-(--color-bg-card) p-4">
-		<div class="text-xs uppercase tracking-wider text-(--color-fg-muted) mb-1">Total P&amp;L</div>
-		<div class="text-2xl font-semibold {pnlClass(Number(allTime?.pnl_lamports ?? 0))}">
-			{fmtSol(allTime?.pnl_lamports)}
+		<div class="text-xs uppercase tracking-wider text-(--color-fg-muted) mb-1">Total P&amp;L (net)</div>
+		<div class="text-2xl font-semibold {pnlClass(Number(allTime?.net_pnl_lamports ?? 0))}">
+			{fmtSol(allTime?.net_pnl_lamports)}
 		</div>
-		<div class="text-xs text-(--color-fg-muted) mt-1">{fmtUsd(allTime?.pnl_lamports)}</div>
+		<div class="text-xs text-(--color-fg-muted) mt-1">
+			{fmtUsd(allTime?.net_pnl_lamports)}
+			· gross {fmtSol(allTime?.pnl_lamports, 3)}
+		</div>
 	</div>
 	<div class="rounded-md border border-(--color-border) bg-(--color-bg-card) p-4">
 		<div class="text-xs uppercase tracking-wider text-(--color-fg-muted) mb-1">Avg loser</div>
@@ -136,6 +156,7 @@
 				<th class="text-right px-4 py-2 font-medium">Peak drop</th>
 				<th class="text-right px-4 py-2 font-medium">Stop loss</th>
 				<th class="text-right px-4 py-2 font-medium">Max hold</th>
+				<th class="text-right px-4 py-2 font-medium" title="Curve drain — full loss, no exit quote">Drain</th>
 				<th class="text-right px-4 py-2 font-medium">Gross PnL</th>
 				<th class="text-right px-4 py-2 font-medium">Net (after fees)</th>
 				<th class="text-right px-4 py-2 font-medium">USD</th>
@@ -153,6 +174,7 @@
 					<td class="px-4 py-2 mono text-xs num text-right">{d.peak_drop}</td>
 					<td class="px-4 py-2 mono text-xs num text-right">{d.stop_loss}</td>
 					<td class="px-4 py-2 mono text-xs num text-right">{d.max_hold}</td>
+					<td class="px-4 py-2 mono text-xs num text-right">{d.drain ?? 0}</td>
 					<td class="px-4 py-2 mono text-xs num text-right {pnlClass(Number(d.pnl_lamports))}">
 						{fmtSol(d.pnl_lamports)}
 					</td>
@@ -164,7 +186,7 @@
 					</td>
 				</tr>
 			{:else}
-				<tr><td colspan="10" class="px-4 py-6 text-(--color-fg-muted)">No closed trades yet.</td></tr>
+				<tr><td colspan="11" class="px-4 py-6 text-(--color-fg-muted)">No closed trades yet.</td></tr>
 			{/each}
 		</tbody>
 	</table>
@@ -232,8 +254,9 @@
 				{@const entryLp = Number(r.entrySolLamports ?? 0)}
 				{@const pnlLp = Number(r.pnlLamports ?? 0)}
 				{@const exitLp = exitLpFor(entryLp, pnlLp)}
-				{@const fee = feeUsdFor(entryLp, pnlLp)}
-				{@const net = netUsdFor(entryLp, pnlLp)}
+				{@const hasExitQuote = r.pnlLamports != null}
+				{@const fee = feeUsdFor(entryLp, pnlLp, hasExitQuote)}
+				{@const net = netUsdFor(entryLp, pnlLp, hasExitQuote)}
 				<tr>
 					<td class="px-3 py-2 mono text-xs text-(--color-fg-muted)">{fmtRelative(r.closedAt)}</td>
 					<td class="px-3 py-2 text-xs">
@@ -249,21 +272,17 @@
 					<td class="px-3 py-2 mono text-xs num text-right">
 						${((entryLp / 1e9) * data.solUsd).toFixed(2)}
 					</td>
-					<td class="px-3 py-2 mono text-xs num text-right">
-						{r.pnlLamports != null ? `$${((exitLp / 1e9) * data.solUsd).toFixed(2)}` : '—'}
+					<td class="px-3 py-2 mono text-xs num text-right" title={hasExitQuote ? '' : 'No sell quote — curve drained, tokens worthless'}>
+						{hasExitQuote ? `$${((exitLp / 1e9) * data.solUsd).toFixed(2)}` : '$0.00'}
 					</td>
 					<td class="px-3 py-2 mono text-xs num text-right text-(--color-fg-muted)">
-						{r.pnlLamports != null ? `-$${fee.toFixed(2)}` : '—'}
+						-${fee.toFixed(2)}
 					</td>
 					<td class="px-3 py-2 mono text-xs num text-right {pnlClass(Number(r.pnlPct))}">
-						{fmtPct(r.pnlPct)}
+						{hasExitQuote ? fmtPct(r.pnlPct) : '-100.0%'}
 					</td>
 					<td class="px-3 py-2 mono text-xs num text-right {pnlClass(net)}">
-						{r.pnlLamports != null
-							? net >= 0
-								? `+$${net.toFixed(2)}`
-								: `-$${Math.abs(net).toFixed(2)}`
-							: '—'}
+						{net >= 0 ? `+$${net.toFixed(2)}` : `-$${Math.abs(net).toFixed(2)}`}
 					</td>
 				</tr>
 			{:else}
