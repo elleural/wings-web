@@ -32,11 +32,40 @@
 
 	function fmtSeconds(v: number | string | null | undefined): string {
 		if (v == null) return '—';
-		const n = typeof v === 'string' ? Number(v) : v;
+		let n = typeof v === 'string' ? Number(v) : v;
 		if (!Number.isFinite(n)) return '—';
+		// Held time is always positive — old rows in the DB have negative
+		// held_s due to a transaction-clock bug fixed at copycat side.
+		n = Math.abs(n);
+		if (n < 1) return `<1s`;
 		if (n < 60) return `${Math.round(n)}s`;
-		if (n < 3600) return `${(n / 60).toFixed(1)}m`;
-		return `${(n / 3600).toFixed(1)}h`;
+		if (n < 3600) {
+			const m = Math.floor(n / 60);
+			const s = Math.round(n % 60);
+			return s ? `${m}m ${s}s` : `${m}m`;
+		}
+		const h = Math.floor(n / 3600);
+		const m = Math.round((n % 3600) / 60);
+		return m ? `${h}h ${m}m` : `${h}h`;
+	}
+
+	const PUMPFUN_FEE_BPS = 100; // 1% per swap
+
+	function feeUsdFor(entryLp: number | null | undefined, pnlLp: number | null | undefined): number {
+		const e = Number(entryLp ?? 0);
+		const p = Number(pnlLp ?? 0);
+		if (!Number.isFinite(e) || e <= 0) return 0;
+		// Fee on entry + fee on exit (which is entry+pnl).
+		const feeLp = (e * PUMPFUN_FEE_BPS) / 10000 + ((e + p) * PUMPFUN_FEE_BPS) / 10000;
+		return (feeLp / 1e9) * data.solUsd;
+	}
+	function netUsdFor(entryLp: number | null | undefined, pnlLp: number | null | undefined): number {
+		const p = Number(pnlLp ?? 0);
+		const grossUsd = (p / 1e9) * data.solUsd;
+		return grossUsd - feeUsdFor(entryLp, pnlLp);
+	}
+	function exitLpFor(entryLp: number | null | undefined, pnlLp: number | null | undefined): number {
+		return Number(entryLp ?? 0) + Number(pnlLp ?? 0);
 	}
 
 	const allTime = $derived(data.allTime);
@@ -177,47 +206,68 @@
 
 <!-- Recent closes -->
 <h2 class="text-sm uppercase tracking-wider text-(--color-fg-muted) mb-2">Recent closes (last 50)</h2>
-<div class="rounded-md border border-(--color-border) bg-(--color-bg-card) overflow-hidden">
+<div class="rounded-md border border-(--color-border) bg-(--color-bg-card) overflow-x-auto">
 	<table class="w-full text-sm">
 		<thead class="bg-(--color-bg-elev) text-xs uppercase tracking-wider text-(--color-fg-muted)">
 			<tr>
-				<th class="text-left px-4 py-2 font-medium">Closed</th>
-				<th class="text-left px-4 py-2 font-medium">Token</th>
-				<th class="text-left px-4 py-2 font-medium">Reason</th>
-				<th class="text-right px-4 py-2 font-medium">Score</th>
-				<th class="text-right px-4 py-2 font-medium">Held</th>
-				<th class="text-right px-4 py-2 font-medium">PnL %</th>
-				<th class="text-right px-4 py-2 font-medium">PnL SOL</th>
-				<th class="text-right px-4 py-2 font-medium">USD</th>
+				<th class="text-left px-3 py-2 font-medium">Closed</th>
+				<th class="text-left px-3 py-2 font-medium">Token</th>
+				<th class="text-left px-3 py-2 font-medium">Reason</th>
+				<th class="text-right px-3 py-2 font-medium">Score</th>
+				<th class="text-right px-3 py-2 font-medium">Held</th>
+				<th class="text-right px-3 py-2 font-medium" title="Predicted phase-2 duration (model)">Pred P2</th>
+				<th class="text-right px-3 py-2 font-medium" title="USD spent on entry">$ in</th>
+				<th class="text-right px-3 py-2 font-medium" title="USD received on exit (entry + pnl, before fees)">$ out</th>
+				<th class="text-right px-3 py-2 font-medium" title="Pump.fun 1%/leg fee approximation">Fees</th>
+				<th class="text-right px-3 py-2 font-medium">PnL %</th>
+				<th class="text-right px-3 py-2 font-medium" title="Net = gross PnL minus fees">Net $</th>
 			</tr>
 		</thead>
 		<tbody class="divide-y divide-(--color-border)">
 			{#each data.recent as r (r.id)}
+				{@const heldS =
+					r.openedAt && r.closedAt
+						? Math.abs((new Date(r.closedAt).getTime() - new Date(r.openedAt).getTime()) / 1000)
+						: null}
+				{@const entryLp = Number(r.entrySolLamports ?? 0)}
+				{@const pnlLp = Number(r.pnlLamports ?? 0)}
+				{@const exitLp = exitLpFor(entryLp, pnlLp)}
+				{@const fee = feeUsdFor(entryLp, pnlLp)}
+				{@const net = netUsdFor(entryLp, pnlLp)}
 				<tr>
-					<td class="px-4 py-2 mono text-xs text-(--color-fg-muted)">{fmtRelative(r.closedAt)}</td>
-					<td class="px-4 py-2 text-xs">
+					<td class="px-3 py-2 mono text-xs text-(--color-fg-muted)">{fmtRelative(r.closedAt)}</td>
+					<td class="px-3 py-2 text-xs">
 						<span class="font-medium">{r.tokenSymbol ?? r.tokenName ?? '—'}</span>
-						<span class="ml-2 mono text-(--color-fg-muted)">{r.tokenMint.slice(0, 12)}…</span>
+						<span class="ml-2 mono text-(--color-fg-muted)">{r.tokenMint.slice(0, 10)}…</span>
 					</td>
-					<td class="px-4 py-2 mono text-xs">{r.exitReason ?? '—'}</td>
-					<td class="px-4 py-2 mono text-xs num text-right">{r.score ?? '—'}</td>
-					<td class="px-4 py-2 mono text-xs num text-right">
-						{r.openedAt && r.closedAt
-							? fmtSeconds((new Date(r.closedAt).getTime() - new Date(r.openedAt).getTime()) / 1000)
-							: '—'}
+					<td class="px-3 py-2 mono text-xs">{r.exitReason ?? '—'}</td>
+					<td class="px-3 py-2 mono text-xs num text-right">{r.score ?? '—'}</td>
+					<td class="px-3 py-2 mono text-xs num text-right">{fmtSeconds(heldS)}</td>
+					<td class="px-3 py-2 mono text-xs num text-right text-(--color-fg-muted)">
+						{r.predictedMaxHoldS ? fmtSeconds(r.predictedMaxHoldS) : '—'}
 					</td>
-					<td class="px-4 py-2 mono text-xs num text-right {pnlClass(Number(r.pnlPct))}">
+					<td class="px-3 py-2 mono text-xs num text-right">
+						${((entryLp / 1e9) * data.solUsd).toFixed(2)}
+					</td>
+					<td class="px-3 py-2 mono text-xs num text-right">
+						{r.pnlLamports != null ? `$${((exitLp / 1e9) * data.solUsd).toFixed(2)}` : '—'}
+					</td>
+					<td class="px-3 py-2 mono text-xs num text-right text-(--color-fg-muted)">
+						{r.pnlLamports != null ? `-$${fee.toFixed(2)}` : '—'}
+					</td>
+					<td class="px-3 py-2 mono text-xs num text-right {pnlClass(Number(r.pnlPct))}">
 						{fmtPct(r.pnlPct)}
 					</td>
-					<td class="px-4 py-2 mono text-xs num text-right {pnlClass(Number(r.pnlLamports))}">
-						{fmtSol(r.pnlLamports)}
-					</td>
-					<td class="px-4 py-2 mono text-xs num text-right {pnlClass(Number(r.pnlLamports))}">
-						{fmtUsd(r.pnlLamports)}
+					<td class="px-3 py-2 mono text-xs num text-right {pnlClass(net)}">
+						{r.pnlLamports != null
+							? net >= 0
+								? `+$${net.toFixed(2)}`
+								: `-$${Math.abs(net).toFixed(2)}`
+							: '—'}
 					</td>
 				</tr>
 			{:else}
-				<tr><td colspan="8" class="px-4 py-6 text-(--color-fg-muted)">No closed trades yet.</td></tr>
+				<tr><td colspan="11" class="px-3 py-6 text-(--color-fg-muted)">No closed trades yet.</td></tr>
 			{/each}
 		</tbody>
 	</table>
