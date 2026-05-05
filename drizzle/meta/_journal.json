@@ -36,6 +36,13 @@
       "when": 1777945124789,
       "tag": "0004_natural_shinobi_shaw",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1777949140982,
+      "tag": "0005_parched_jasper_sitwell",
+      "breakpoints": true
     }
   ]
 }

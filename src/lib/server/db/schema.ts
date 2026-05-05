@@ -661,6 +661,71 @@ export const pumpRiderPositions = pgTable(
 	]
 );
 
+// Mirrors copycat's `paper_lp_positions` rows for `strategy='a3_dlmm_lp'` (and
+// future Meteora-DLMM strategies A1/A2). Pushed via `a3_dlmm_sync` worker;
+// idempotent on copycatId. Richer than pumpRiderPositions because A3 has a
+// real LVR-gate accounting layer — we keep the gate inputs (σ, fee/LVR rates,
+// fee_multiplier, on-chain bin_active_usd at entry) so the dashboard can
+// explain WHY each position opened, not just what happened.
+export const dlmmLpPositions = pgTable(
+	'dlmm_lp_positions',
+	{
+		id: bigserial('id', { mode: 'number' }).primaryKey(),
+		copycatId: bigint('copycat_id', { mode: 'number' }).notNull(),
+		strategy: text('strategy').notNull(),       // 'a3_dlmm_lp', etc
+		poolAddress: text('pool_address').notNull(),
+		tokenMintX: text('token_mint_x'),
+		// DLMM bin range
+		binIdLow: integer('bin_id_low'),
+		binIdHigh: integer('bin_id_high'),
+		geometry: text('geometry'),                  // 'Spot-Wide', 'Spot-Concentrated', etc
+		// Timing
+		openedAt: timestamp('opened_at', { withTimezone: true, mode: 'date' }).notNull(),
+		closedAt: timestamp('closed_at', { withTimezone: true, mode: 'date' }),
+		// Status
+		status: positionStatusEnum('status').notNull().default('open'),
+		exitStrategy: text('exit_strategy'),         // 'lp_harvest', etc
+		exitReason: text('exit_reason'),
+		// Sizing — USD-denominated (LP positions don't have a single "lamports" value)
+		entryValueUsd: numeric('entry_value_usd', { precision: 20, scale: 8 }),
+		exitValueUsd: numeric('exit_value_usd', { precision: 20, scale: 8 }),
+		// Realized accounting at close (for closed); live accumulators (for open)
+		realizedFeesUsd: numeric('realized_fees_usd', { precision: 20, scale: 8 }),
+		realizedLvrUsd: numeric('realized_lvr_usd', { precision: 20, scale: 8 }),
+		realizedPnlUsd: numeric('realized_pnl_usd', { precision: 20, scale: 8 }),
+		realizedYieldRate: numeric('realized_yield_rate', { precision: 12, scale: 8 }),
+		gasCostUsd: numeric('gas_cost_usd', { precision: 20, scale: 8 }),
+		nRebalances: integer('n_rebalances'),
+		holdSeconds: integer('hold_seconds'),
+		outOfRangeSeconds: integer('out_of_range_seconds'),
+		// Gate inputs at entry — explains WHY we opened
+		sigmaAtEntry: numeric('sigma_at_entry', { precision: 12, scale: 8 }),
+		feeYieldRateAtEntry: numeric('fee_yield_rate_at_entry', { precision: 20, scale: 8 }),
+		lvrRateAtEntry: numeric('lvr_rate_at_entry', { precision: 20, scale: 8 }),
+		safetyMarginUsed: numeric('safety_margin_used', { precision: 8, scale: 4 }),
+		predictedYieldRate: numeric('predicted_yield_rate', { precision: 12, scale: 8 }),
+		feeMultiplierUsed: numeric('fee_multiplier_used', { precision: 12, scale: 6 }),
+		feeMultiplierSource: text('fee_multiplier_source'),  // 'onchain_bin' | 'config_static'
+		binActiveUsdAtEntry: numeric('bin_active_usd_at_entry', { precision: 20, scale: 8 }),
+		binActiveIdAtEntry: integer('bin_active_id_at_entry'),
+		// Linkage to the convergence searcher
+		paramSetId: bigint('param_set_id', { mode: 'number' }),
+		// Live diagnostics (open positions only)
+		lastSnapTs: timestamp('last_snap_ts', { withTimezone: true, mode: 'date' }),
+		openPositionValueUsd: numeric('open_position_value_usd', { precision: 20, scale: 8 }),
+		// Bookkeeping
+		syncedAt: timestamp('synced_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`now()`)
+	},
+	(t) => [
+		uniqueIndex('dlmm_lp_copycat_id_unique').on(t.copycatId),
+		index('dlmm_lp_strategy_status_idx').on(t.strategy, t.status),
+		index('dlmm_lp_status_opened_idx').on(t.status, t.openedAt),
+		index('dlmm_lp_closed_at_idx').on(t.closedAt)
+	]
+);
+
 // ----- TYPE EXPORTS ---------------------------------------------------------
 
 export type Account = typeof accounts.$inferSelect;
@@ -695,3 +760,5 @@ export type Heartbeat = typeof heartbeats.$inferSelect;
 export type NewHeartbeat = typeof heartbeats.$inferInsert;
 export type PumpRiderPosition = typeof pumpRiderPositions.$inferSelect;
 export type NewPumpRiderPosition = typeof pumpRiderPositions.$inferInsert;
+export type DlmmLpPosition = typeof dlmmLpPositions.$inferSelect;
+export type NewDlmmLpPosition = typeof dlmmLpPositions.$inferInsert;

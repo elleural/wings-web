@@ -319,3 +319,52 @@ export const pumpRiderBatchSchema = z.object({
 	positions: z.array(pumpRiderPositionUpsertSchema).max(500)
 });
 export type PumpRiderBatch = z.infer<typeof pumpRiderBatchSchema>;
+
+// Mirror of pumpRiderPositionUpsertSchema for DLMM-LP strategies (A3 et al).
+// Field shape matches `_to_payload` in copycat/follow/a3_dlmm_sync.py.
+export const dlmmLpPositionUpsertSchema = z.object({
+	copycatId: z.number().int().positive(),
+	strategy: z.string().min(1),
+	poolAddress: z.string().min(1),
+	tokenMintX: z.string().nullish(),
+	binIdLow: z.number().int().nullish(),
+	binIdHigh: z.number().int().nullish(),
+	geometry: z.string().nullish(),
+	openedAt: isoDate,
+	closedAt: isoDate.nullish(),
+	status: z.enum(['open', 'closed', 'reserved']).default('open'),
+	exitStrategy: z.string().nullish(),
+	exitReason: z.string().nullish(),
+	// Sizing — accept numbers; route casts to decimal string for Postgres NUMERIC
+	entryValueUsd: z.number().nullish(),
+	exitValueUsd: z.number().nullish(),
+	// Realized accounting (closed) or live accumulators (open)
+	realizedFeesUsd: z.number().nullish(),
+	realizedLvrUsd: z.number().nullish(),
+	realizedPnlUsd: z.number().nullish(),
+	realizedYieldRate: z.number().nullish(),
+	gasCostUsd: z.number().nullish(),
+	nRebalances: z.number().int().nullish(),
+	holdSeconds: z.number().int().nullish(),
+	outOfRangeSeconds: z.number().int().nullish(),
+	// Gate inputs at entry — explains WHY we opened
+	sigmaAtEntry: z.number().nullish(),
+	feeYieldRateAtEntry: z.number().nullish(),
+	lvrRateAtEntry: z.number().nullish(),
+	safetyMarginUsed: z.number().nullish(),
+	predictedYieldRate: z.number().nullish(),
+	feeMultiplierUsed: z.number().nullish(),
+	feeMultiplierSource: z.string().nullish(),
+	binActiveUsdAtEntry: z.number().nullish(),
+	binActiveIdAtEntry: z.number().int().nullish(),
+	paramSetId: z.number().int().nullish(),
+	// Live diagnostics
+	lastSnapTs: isoDate.nullish(),
+	openPositionValueUsd: z.number().nullish()
+});
+export type DlmmLpPositionUpsert = z.infer<typeof dlmmLpPositionUpsertSchema>;
+
+export const dlmmLpBatchSchema = z.object({
+	positions: z.array(dlmmLpPositionUpsertSchema).max(500)
+});
+export type DlmmLpBatch = z.infer<typeof dlmmLpBatchSchema>;
