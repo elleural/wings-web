@@ -14,6 +14,7 @@ import type { PageServerLoad } from './$types';
 
 const PUMPFUN_FEE_BPS = 100; // 1% per swap, applied to entry + exit
 const SOL_USD = 150; // rough display rate
+const POSITION_SIZE_LAMPORTS = 167_000_000; // 0.167 SOL ≈ $25 — keeps display in sync with copycat
 
 interface DailyRow {
 	day: string;
@@ -139,7 +140,8 @@ export const load: PageServerLoad = async () => {
 			missed: missedRows,
 			allTime: allTimeArr[0] ?? null,
 			solUsd: SOL_USD,
-			feeBps: PUMPFUN_FEE_BPS
+			feeBps: PUMPFUN_FEE_BPS,
+			positionSizeLamports: POSITION_SIZE_LAMPORTS
 		};
 	} catch (err) {
 		return {
@@ -150,6 +152,7 @@ export const load: PageServerLoad = async () => {
 			allTime: null,
 			solUsd: SOL_USD,
 			feeBps: PUMPFUN_FEE_BPS,
+			positionSizeLamports: POSITION_SIZE_LAMPORTS,
 			dbError: err instanceof Error ? err.message : String(err)
 		};
 	}

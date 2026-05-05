@@ -7,6 +7,46 @@
 	// Tab state — default to 'recent', toggle to 'missed'
 	let activeTab: 'recent' | 'missed' = $state('recent');
 
+	// Sort state — separate per table. Click a header to sort by that key,
+	// click again to flip direction.
+	type SortDir = 'asc' | 'desc';
+	let recentSortKey: string = $state('closedAt');
+	let recentSortDir: SortDir = $state('desc');
+	let missedSortKey: string = $state('detectedAt');
+	let missedSortDir: SortDir = $state('desc');
+
+	function toggleSort(
+		current: string,
+		dir: SortDir,
+		key: string
+	): { key: string; dir: SortDir } {
+		if (current === key) {
+			return { key, dir: dir === 'asc' ? 'desc' : 'asc' };
+		}
+		return { key, dir: 'desc' };
+	}
+
+	function sortIcon(currentKey: string, dir: SortDir, key: string): string {
+		if (currentKey !== key) return '';
+		return dir === 'asc' ? ' ▲' : ' ▼';
+	}
+
+	function compare(a: unknown, b: unknown, dir: SortDir): number {
+		// Nulls sort last regardless of direction
+		const aNull = a == null || a === '';
+		const bNull = b == null || b === '';
+		if (aNull && bNull) return 0;
+		if (aNull) return 1;
+		if (bNull) return -1;
+		const aN = typeof a === 'number' ? a : Number(a);
+		const bN = typeof b === 'number' ? b : Number(b);
+		const numeric = Number.isFinite(aN) && Number.isFinite(bN);
+		let cmp: number;
+		if (numeric) cmp = aN - bN;
+		else cmp = String(a).localeCompare(String(b));
+		return dir === 'asc' ? cmp : -cmp;
+	}
+
 	function lpToSol(v: number | string | null | undefined): number {
 		if (v == null) return 0;
 		const n = typeof v === 'string' ? Number(v) : v;
@@ -94,6 +134,107 @@
 			? (Number(allTime.wins) / Number(allTime.total)) * 100
 			: 0
 	);
+
+	// Default position size for "what would we have made" math on the
+	// missed-opps table. Sourced from the server so it stays in sync with
+	// the copycat scenario's position_size_lamports.
+	const POSITION_LP = $derived(data.positionSizeLamports ?? 167_000_000);
+	const POSITION_USD = $derived(((POSITION_LP / 1e9) * data.solUsd));
+
+	// Hypothetical net for a missed opp = TP fires at +100% on POSITION_LP,
+	// fees = 1% per leg on entry + (entry+pnl) → ≈ 3% drag, so net ≈ +97% on entry $.
+	function missedNetUsd(peakPdaLamports: number | string | null | undefined): number {
+		const peak = Number(peakPdaLamports ?? 0);
+		// Only counts as a missed TP if peak ≥ 19 SOL (== +100% would have fired).
+		if (!Number.isFinite(peak) || peak < 19_000_000_000) return 0;
+		const entryLp = POSITION_LP;
+		// Gross PnL at TP = +100% on entry → +entryLp.
+		const grossPnlLp = entryLp;
+		// Fees: 1% on entry leg + 1% on (entry + grossPnl) exit leg
+		const entryFeeLp = (entryLp * data.feeBps) / 10000;
+		const exitFeeLp = ((entryLp + grossPnlLp) * data.feeBps) / 10000;
+		const netLp = grossPnlLp - entryFeeLp - exitFeeLp;
+		return (netLp / 1e9) * data.solUsd;
+	}
+
+	function missedFeeUsd(peakPdaLamports: number | string | null | undefined): number {
+		const peak = Number(peakPdaLamports ?? 0);
+		if (!Number.isFinite(peak) || peak < 19_000_000_000) return 0;
+		const entryLp = POSITION_LP;
+		const entryFeeLp = (entryLp * data.feeBps) / 10000;
+		const exitFeeLp = ((entryLp + entryLp) * data.feeBps) / 10000; // entry+gross
+		return ((entryFeeLp + exitFeeLp) / 1e9) * data.solUsd;
+	}
+
+	// Sorted derivations
+	const sortedRecent = $derived.by(() => {
+		const arr = [...(data.recent ?? [])];
+		arr.sort((a, b) => {
+			const k = recentSortKey;
+			let av: unknown, bv: unknown;
+			if (k === 'heldS') {
+				const calc = (r: typeof a) =>
+					r.openedAt && r.closedAt
+						? Math.abs(
+								(new Date(r.closedAt).getTime() - new Date(r.openedAt).getTime()) / 1000
+							)
+						: null;
+				av = calc(a); bv = calc(b);
+			} else if (k === 'netUsd') {
+				const calc = (r: typeof a) => {
+					const e = Number(r.entrySolLamports ?? 0);
+					const p = Number(r.pnlLamports ?? 0);
+					return netUsdFor(e, p, r.pnlLamports != null);
+				};
+				av = calc(a); bv = calc(b);
+			} else if (k === 'inUsd') {
+				av = Number(a.entrySolLamports ?? 0);
+				bv = Number(b.entrySolLamports ?? 0);
+			} else if (k === 'outUsd') {
+				av = Number(a.entrySolLamports ?? 0) + Number(a.pnlLamports ?? 0);
+				bv = Number(b.entrySolLamports ?? 0) + Number(b.pnlLamports ?? 0);
+			} else if (k === 'feeUsd') {
+				av = feeUsdFor(Number(a.entrySolLamports ?? 0), Number(a.pnlLamports ?? 0), a.pnlLamports != null);
+				bv = feeUsdFor(Number(b.entrySolLamports ?? 0), Number(b.pnlLamports ?? 0), b.pnlLamports != null);
+			} else if (k === 'pnlPct') {
+				av = a.pnlLamports == null ? -1 : Number(a.pnlPct ?? 0);
+				bv = b.pnlLamports == null ? -1 : Number(b.pnlPct ?? 0);
+			} else {
+				av = (a as Record<string, unknown>)[k];
+				bv = (b as Record<string, unknown>)[k];
+			}
+			return compare(av, bv, recentSortDir);
+		});
+		return arr;
+	});
+
+	const sortedMissed = $derived.by(() => {
+		const arr = [...(data.missed ?? [])];
+		arr.sort((a, b) => {
+			const k = missedSortKey;
+			let av: unknown, bv: unknown;
+			if (k === 'netUsd') {
+				av = missedNetUsd(a.peakPdaLamports);
+				bv = missedNetUsd(b.peakPdaLamports);
+			} else if (k === 'feeUsd') {
+				av = missedFeeUsd(a.peakPdaLamports);
+				bv = missedFeeUsd(b.peakPdaLamports);
+			} else if (k === 'inUsd') {
+				av = POSITION_USD; bv = POSITION_USD; // constant
+			} else if (k === 'peakSol') {
+				av = a.peakPdaLamports == null ? null : Number(a.peakPdaLamports);
+				bv = b.peakPdaLamports == null ? null : Number(b.peakPdaLamports);
+			} else if (k === 'issuerSol') {
+				av = a.issuerProfitLamports == null ? null : Number(a.issuerProfitLamports);
+				bv = b.issuerProfitLamports == null ? null : Number(b.issuerProfitLamports);
+			} else {
+				av = (a as Record<string, unknown>)[k];
+				bv = (b as Record<string, unknown>)[k];
+			}
+			return compare(av, bv, missedSortDir);
+		});
+		return arr;
+	});
 </script>
 
 <h1 class="text-xl font-semibold mb-2">Pump-rider — paper-money watcher</h1>
@@ -269,19 +410,36 @@
 	<table class="w-full text-sm">
 		<thead class="bg-(--color-bg-elev) text-xs uppercase tracking-wider text-(--color-fg-muted)">
 			<tr>
-				<th class="text-left px-3 py-2 font-medium">Detected</th>
-				<th class="text-left px-3 py-2 font-medium">Token</th>
-				<th class="text-left px-3 py-2 font-medium">Why skipped</th>
-				<th class="text-right px-3 py-2 font-medium" title="Classifier probability we assigned">Score</th>
-				<th class="text-right px-3 py-2 font-medium" title="What it needed to cross">Threshold</th>
-				<th class="text-right px-3 py-2 font-medium" title="Peak real_sol_reserves the curve reached">Peak</th>
-				<th class="text-right px-3 py-2 font-medium" title="Time from create to peak">Phase 2</th>
-				<th class="text-right px-3 py-2 font-medium" title="Net SOL the issuer extracted">Issuer made</th>
-				<th class="text-right px-3 py-2 font-medium" title="Estimated USD missed at our default position size">$ Missed</th>
+				{#snippet th(key: string, label: string, alignRight = false, title = '')}
+					<th
+						class={[
+							'px-3 py-2 font-medium select-none cursor-pointer hover:text-(--color-fg)',
+							alignRight ? 'text-right' : 'text-left'
+						].join(' ')}
+						title={title || label}
+						onclick={() => {
+							const r = toggleSort(missedSortKey, missedSortDir, key);
+							missedSortKey = r.key; missedSortDir = r.dir;
+						}}
+					>{label}{sortIcon(missedSortKey, missedSortDir, key)}</th>
+				{/snippet}
+				{@render th('detectedAt', 'Detected')}
+				{@render th('tokenSymbol', 'Token')}
+				{@render th('decision', 'Why skipped')}
+				{@render th('score', 'Score', true, 'Classifier probability we assigned')}
+				{@render th('probThreshold', 'Threshold', true, 'What it needed to cross')}
+				{@render th('peakSol', 'Peak', true, 'Peak real_sol_reserves the curve reached')}
+				{@render th('phase2DurationSeconds', 'Phase 2', true, 'Time from create to peak')}
+				{@render th('issuerSol', 'Issuer made', true, 'Net SOL the issuer extracted')}
+				{@render th('inUsd', '$ in', true, 'USD we would have spent on entry')}
+				{@render th('feeUsd', 'Fees', true, 'Estimated 1%/leg pump.fun fees')}
+				{@render th('netUsd', 'Net missed $', true, `Hypothetical net after fees on a $${POSITION_USD.toFixed(0)} position if TP fired`)}
 			</tr>
 		</thead>
 		<tbody class="divide-y divide-(--color-border)">
-			{#each data.missed as m (m.id)}
+			{#each sortedMissed as m (m.id)}
+				{@const fee = missedFeeUsd(m.peakPdaLamports)}
+				{@const net = missedNetUsd(m.peakPdaLamports)}
 				<tr>
 					<td class="px-3 py-2 mono text-xs text-(--color-fg-muted)">{fmtRelative(m.detectedAt)}</td>
 					<td class="px-3 py-2 text-xs">
@@ -300,14 +458,16 @@
 							? `${Number(m.issuerProfitLamports) >= 0 ? '+' : ''}${(Number(m.issuerProfitLamports) / 1e9).toFixed(2)} SOL`
 							: '—'}
 					</td>
-					<td class="px-3 py-2 mono text-xs num text-right text-(--color-warn)">
-						{m.estimatedMissedUsd != null
-							? `-$${Number(m.estimatedMissedUsd).toFixed(2)}`
-							: '—'}
+					<td class="px-3 py-2 mono text-xs num text-right">${POSITION_USD.toFixed(2)}</td>
+					<td class="px-3 py-2 mono text-xs num text-right text-(--color-fg-muted)">
+						{fee > 0 ? `-$${fee.toFixed(2)}` : '—'}
+					</td>
+					<td class="px-3 py-2 mono text-xs num text-right {pnlClass(net)}">
+						{net > 0 ? `+$${net.toFixed(2)}` : net < 0 ? `-$${Math.abs(net).toFixed(2)}` : '—'}
 					</td>
 				</tr>
 			{:else}
-				<tr><td colspan="9" class="px-3 py-6 text-(--color-fg-muted)">No missed opportunities yet — backfill labeler hasn't reached skipped rows.</td></tr>
+				<tr><td colspan="11" class="px-3 py-6 text-(--color-fg-muted)">No missed opportunities yet — backfill labeler hasn't reached skipped rows.</td></tr>
 			{/each}
 		</tbody>
 	</table>
@@ -321,21 +481,34 @@
 	<table class="w-full text-sm">
 		<thead class="bg-(--color-bg-elev) text-xs uppercase tracking-wider text-(--color-fg-muted)">
 			<tr>
-				<th class="text-left px-3 py-2 font-medium">Closed</th>
-				<th class="text-left px-3 py-2 font-medium">Token</th>
-				<th class="text-left px-3 py-2 font-medium">Reason</th>
-				<th class="text-right px-3 py-2 font-medium">Score</th>
-				<th class="text-right px-3 py-2 font-medium">Held</th>
-				<th class="text-right px-3 py-2 font-medium" title="Predicted phase-2 duration (model)">Pred P2</th>
-				<th class="text-right px-3 py-2 font-medium" title="USD spent on entry">$ in</th>
-				<th class="text-right px-3 py-2 font-medium" title="USD received on exit (entry + pnl, before fees)">$ out</th>
-				<th class="text-right px-3 py-2 font-medium" title="Pump.fun 1%/leg fee approximation">Fees</th>
-				<th class="text-right px-3 py-2 font-medium">PnL %</th>
-				<th class="text-right px-3 py-2 font-medium" title="Net = gross PnL minus fees">Net $</th>
+				{#snippet th(key: string, label: string, alignRight = false, title = '')}
+					<th
+						class={[
+							'px-3 py-2 font-medium select-none cursor-pointer hover:text-(--color-fg)',
+							alignRight ? 'text-right' : 'text-left'
+						].join(' ')}
+						title={title || label}
+						onclick={() => {
+							const r = toggleSort(recentSortKey, recentSortDir, key);
+							recentSortKey = r.key; recentSortDir = r.dir;
+						}}
+					>{label}{sortIcon(recentSortKey, recentSortDir, key)}</th>
+				{/snippet}
+				{@render th('closedAt', 'Closed')}
+				{@render th('tokenSymbol', 'Token')}
+				{@render th('exitReason', 'Reason')}
+				{@render th('score', 'Score', true)}
+				{@render th('heldS', 'Held', true)}
+				{@render th('predictedMaxHoldS', 'Pred P2', true, 'Predicted phase-2 duration (model)')}
+				{@render th('inUsd', '$ in', true, 'USD spent on entry')}
+				{@render th('outUsd', '$ out', true, 'USD received on exit (entry + pnl, before fees)')}
+				{@render th('feeUsd', 'Fees', true, 'Pump.fun 1%/leg fee approximation')}
+				{@render th('pnlPct', 'PnL %', true)}
+				{@render th('netUsd', 'Net $', true, 'Net = gross PnL minus fees')}
 			</tr>
 		</thead>
 		<tbody class="divide-y divide-(--color-border)">
-			{#each data.recent as r (r.id)}
+			{#each sortedRecent as r (r.id)}
 				{@const heldS =
 					r.openedAt && r.closedAt
 						? Math.abs((new Date(r.closedAt).getTime() - new Date(r.openedAt).getTime()) / 1000)
