@@ -620,6 +620,45 @@ export const heartbeats = pgTable(
 	(t) => [index('heartbeats_source_ts_idx').on(t.source, t.ts)]
 );
 
+// Pump-rider missed opportunities — coins the classifier filtered out
+// that the postmortem labeler later identified as winners. Used to
+// calibrate the threshold and diagnose train/serve drift.
+export const pumpRiderMissed = pgTable(
+	'pump_rider_missed_opportunities',
+	{
+		id: bigserial('id', { mode: 'number' }).primaryKey(),
+		// Use the copycat pool_features_at_init.pool (bonding curve PDA) as
+		// the unique key — one missed-opportunity row per detection.
+		pool: text('pool').notNull(),
+		baseMint: text('base_mint').notNull(),
+		creator: text('creator'),
+		detectedAt: timestamp('detected_at', { withTimezone: true, mode: 'date' }).notNull(),
+		// What the classifier said
+		score: numeric('score', { precision: 8, scale: 6 }),
+		probThreshold: numeric('prob_threshold', { precision: 8, scale: 6 }),
+		decision: text('decision'),                       // skip_low_score / skip_capacity / etc.
+		// What actually happened (from postmortem)
+		outcome: text('outcome').notNull(),
+		peakPdaLamports: bigint('peak_pda_lamports', { mode: 'number' }),
+		phase2DurationSeconds: integer('phase2_duration_seconds'),
+		issuerProfitLamports: bigint('issuer_profit_lamports', { mode: 'number' }),
+		// Estimated $ we missed (assuming our default position size + +100% TP)
+		estimatedMissedUsd: numeric('estimated_missed_usd', { precision: 10, scale: 2 }),
+		// Display
+		tokenName: text('token_name'),
+		tokenSymbol: text('token_symbol'),
+		imageUri: text('image_uri'),
+		syncedAt: timestamp('synced_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`now()`)
+	},
+	(t) => [
+		uniqueIndex('pump_rider_missed_pool_unique').on(t.pool),
+		index('pump_rider_missed_detected_idx').on(t.detectedAt),
+		index('pump_rider_missed_outcome_idx').on(t.outcome)
+	]
+);
+
 // Paper-trade positions for the pump-rider strategy. Mirrored from
 // copycat's local `paper_lp_positions` table via the sync endpoint.
 // Used by /pump-rider page to track strategy performance pre-real-money.
@@ -760,5 +799,7 @@ export type Heartbeat = typeof heartbeats.$inferSelect;
 export type NewHeartbeat = typeof heartbeats.$inferInsert;
 export type PumpRiderPosition = typeof pumpRiderPositions.$inferSelect;
 export type NewPumpRiderPosition = typeof pumpRiderPositions.$inferInsert;
+export type PumpRiderMissed = typeof pumpRiderMissed.$inferSelect;
+export type NewPumpRiderMissed = typeof pumpRiderMissed.$inferInsert;
 export type DlmmLpPosition = typeof dlmmLpPositions.$inferSelect;
 export type NewDlmmLpPosition = typeof dlmmLpPositions.$inferInsert;

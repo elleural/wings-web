@@ -226,6 +226,61 @@
 	</table>
 </div>
 
+<!-- Missed opportunities -->
+<h2 class="text-sm uppercase tracking-wider text-(--color-fg-muted) mb-2">
+	Missed opportunities ({data.missed.length})
+	<span class="text-xs normal-case tracking-normal text-(--color-fg-muted) ml-2">
+		— skipped by classifier, ended up profitable
+	</span>
+</h2>
+<div class="rounded-md border border-(--color-border) bg-(--color-bg-card) overflow-x-auto mb-8">
+	<table class="w-full text-sm">
+		<thead class="bg-(--color-bg-elev) text-xs uppercase tracking-wider text-(--color-fg-muted)">
+			<tr>
+				<th class="text-left px-3 py-2 font-medium">Detected</th>
+				<th class="text-left px-3 py-2 font-medium">Token</th>
+				<th class="text-left px-3 py-2 font-medium">Why skipped</th>
+				<th class="text-right px-3 py-2 font-medium" title="Classifier probability we assigned">Score</th>
+				<th class="text-right px-3 py-2 font-medium" title="What it needed to cross">Threshold</th>
+				<th class="text-right px-3 py-2 font-medium" title="Peak real_sol_reserves the curve reached">Peak</th>
+				<th class="text-right px-3 py-2 font-medium" title="Time from create to peak">Phase 2</th>
+				<th class="text-right px-3 py-2 font-medium" title="Net SOL the issuer extracted">Issuer made</th>
+				<th class="text-right px-3 py-2 font-medium" title="Estimated USD missed at our default position size">$ Missed</th>
+			</tr>
+		</thead>
+		<tbody class="divide-y divide-(--color-border)">
+			{#each data.missed as m (m.id)}
+				<tr>
+					<td class="px-3 py-2 mono text-xs text-(--color-fg-muted)">{fmtRelative(m.detectedAt)}</td>
+					<td class="px-3 py-2 text-xs">
+						<span class="font-medium">{m.tokenSymbol ?? m.tokenName ?? '—'}</span>
+						<span class="ml-2 mono text-(--color-fg-muted)">{m.baseMint.slice(0, 10)}…</span>
+					</td>
+					<td class="px-3 py-2 mono text-xs">{m.decision ?? '—'}</td>
+					<td class="px-3 py-2 mono text-xs num text-right">{m.score ?? '—'}</td>
+					<td class="px-3 py-2 mono text-xs num text-right text-(--color-fg-muted)">{m.probThreshold ?? '—'}</td>
+					<td class="px-3 py-2 mono text-xs num text-right">
+						{m.peakPdaLamports ? `${(Number(m.peakPdaLamports) / 1e9).toFixed(1)} SOL` : '—'}
+					</td>
+					<td class="px-3 py-2 mono text-xs num text-right">{fmtSeconds(m.phase2DurationSeconds)}</td>
+					<td class="px-3 py-2 mono text-xs num text-right">
+						{m.issuerProfitLamports != null
+							? `${Number(m.issuerProfitLamports) >= 0 ? '+' : ''}${(Number(m.issuerProfitLamports) / 1e9).toFixed(2)} SOL`
+							: '—'}
+					</td>
+					<td class="px-3 py-2 mono text-xs num text-right text-(--color-warn)">
+						{m.estimatedMissedUsd != null
+							? `-$${Number(m.estimatedMissedUsd).toFixed(2)}`
+							: '—'}
+					</td>
+				</tr>
+			{:else}
+				<tr><td colspan="9" class="px-3 py-6 text-(--color-fg-muted)">No missed opportunities yet — backfill labeler hasn't reached skipped rows.</td></tr>
+			{/each}
+		</tbody>
+	</table>
+</div>
+
 <!-- Recent closes -->
 <h2 class="text-sm uppercase tracking-wider text-(--color-fg-muted) mb-2">Recent closes (last 50)</h2>
 <div class="rounded-md border border-(--color-border) bg-(--color-bg-card) overflow-x-auto">

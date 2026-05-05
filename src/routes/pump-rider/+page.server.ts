@@ -42,7 +42,7 @@ interface AllTimeRow {
 
 export const load: PageServerLoad = async () => {
 	try {
-		const [openRows, recentRows, dailyRows] = await Promise.all([
+		const [openRows, recentRows, dailyRows, missedRows] = await Promise.all([
 			db
 				.select()
 				.from(schema.pumpRiderPositions)
@@ -93,6 +93,11 @@ export const load: PageServerLoad = async () => {
 				GROUP BY day
 				ORDER BY day DESC
 			`),
+			db
+				.select()
+				.from(schema.pumpRiderMissed)
+				.orderBy(desc(schema.pumpRiderMissed.detectedAt))
+				.limit(50)
 		]);
 
 		// Aggregate stats — uses the same realized_pnl_lamports expression
@@ -131,6 +136,7 @@ export const load: PageServerLoad = async () => {
 			open: openRows,
 			recent: recentRows,
 			daily,
+			missed: missedRows,
 			allTime: allTimeArr[0] ?? null,
 			solUsd: SOL_USD,
 			feeBps: PUMPFUN_FEE_BPS
@@ -140,6 +146,7 @@ export const load: PageServerLoad = async () => {
 			open: [],
 			recent: [],
 			daily: [],
+			missed: [],
 			allTime: null,
 			solUsd: SOL_USD,
 			feeBps: PUMPFUN_FEE_BPS,

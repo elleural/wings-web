@@ -320,6 +320,30 @@ export const pumpRiderBatchSchema = z.object({
 });
 export type PumpRiderBatch = z.infer<typeof pumpRiderBatchSchema>;
 
+export const pumpRiderMissedUpsertSchema = z.object({
+	pool: z.string().min(1),
+	baseMint: z.string().min(1),
+	creator: z.string().nullish(),
+	detectedAt: isoDate,
+	score: z.number().nullish(),
+	probThreshold: z.number().nullish(),
+	decision: z.string().nullish(),
+	outcome: z.string().min(1),
+	peakPdaLamports: z.number().int().nullish(),
+	phase2DurationSeconds: z.number().int().nullish(),
+	issuerProfitLamports: z.number().int().nullish(),
+	estimatedMissedUsd: z.number().nullish(),
+	tokenName: z.string().nullish(),
+	tokenSymbol: z.string().nullish(),
+	imageUri: z.string().nullish()
+});
+export type PumpRiderMissedUpsert = z.infer<typeof pumpRiderMissedUpsertSchema>;
+
+export const pumpRiderMissedBatchSchema = z.object({
+	missed: z.array(pumpRiderMissedUpsertSchema).max(500)
+});
+export type PumpRiderMissedBatch = z.infer<typeof pumpRiderMissedBatchSchema>;
+
 // Mirror of pumpRiderPositionUpsertSchema for DLMM-LP strategies (A3 et al).
 // Field shape matches `_to_payload` in copycat/follow/a3_dlmm_sync.py.
 export const dlmmLpPositionUpsertSchema = z.object({
