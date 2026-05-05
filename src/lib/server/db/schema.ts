@@ -620,6 +620,47 @@ export const heartbeats = pgTable(
 	(t) => [index('heartbeats_source_ts_idx').on(t.source, t.ts)]
 );
 
+// Paper-trade positions for the pump-rider strategy. Mirrored from
+// copycat's local `paper_lp_positions` table via the sync endpoint.
+// Used by /pump-rider page to track strategy performance pre-real-money.
+export const pumpRiderPositions = pgTable(
+	'pump_rider_positions',
+	{
+		id: bigserial('id', { mode: 'number' }).primaryKey(),
+		// Original copycat-side row id; lets us de-dup pushes.
+		copycatId: bigint('copycat_id', { mode: 'number' }).notNull(),
+		poolAddress: text('pool_address').notNull(),     // bonding curve PDA
+		tokenMint: text('token_mint').notNull(),
+		creator: text('creator'),
+		triggerSignature: text('trigger_signature'),
+		score: numeric('score', { precision: 8, scale: 6 }),
+		predictedMaxHoldS: integer('predicted_max_hold_s'),
+		// Timing
+		openedAt: timestamp('opened_at', { withTimezone: true, mode: 'date' }).notNull(),
+		closedAt: timestamp('closed_at', { withTimezone: true, mode: 'date' }),
+		// Money
+		entrySolLamports: bigint('entry_sol_lamports', { mode: 'number' }).notNull(),
+		exitSolLamports: bigint('exit_sol_lamports', { mode: 'number' }),
+		pnlLamports: bigint('pnl_lamports', { mode: 'number' }),
+		pnlPct: numeric('pnl_pct', { precision: 10, scale: 6 }),
+		// Status
+		status: positionStatusEnum('status').notNull().default('open'),
+		exitReason: text('exit_reason'),                  // tp_fired / peak_drop / stop_loss / max_hold / drain_detected / graduated
+		// Display
+		tokenName: text('token_name'),
+		tokenSymbol: text('token_symbol'),
+		imageUri: text('image_uri'),
+		syncedAt: timestamp('synced_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`now()`)
+	},
+	(t) => [
+		uniqueIndex('pump_rider_copycat_id_unique').on(t.copycatId),
+		index('pump_rider_status_opened_idx').on(t.status, t.openedAt),
+		index('pump_rider_closed_at_idx').on(t.closedAt)
+	]
+);
+
 // ----- TYPE EXPORTS ---------------------------------------------------------
 
 export type Account = typeof accounts.$inferSelect;
@@ -652,3 +693,5 @@ export type CandidateEvent = typeof candidateEvents.$inferSelect;
 export type NewCandidateEvent = typeof candidateEvents.$inferInsert;
 export type Heartbeat = typeof heartbeats.$inferSelect;
 export type NewHeartbeat = typeof heartbeats.$inferInsert;
+export type PumpRiderPosition = typeof pumpRiderPositions.$inferSelect;
+export type NewPumpRiderPosition = typeof pumpRiderPositions.$inferInsert;

@@ -10,6 +10,7 @@
 	const links = [
 		{ href: '/', label: 'overview' },
 		{ href: '/positions', label: 'positions' },
+		{ href: '/pump-rider', label: 'pump-rider' },
 		{ href: '/decisions', label: 'decisions' },
 		{ href: '/fills', label: 'fills' },
 		{ href: '/strategies', label: 'strategies' },

@@ -292,3 +292,30 @@ export const accountUpsertSchema = z.object({
 	reserveUsd: decimalString.default('0')
 });
 export type AccountUpsert = z.infer<typeof accountUpsertSchema>;
+
+export const pumpRiderPositionUpsertSchema = z.object({
+	copycatId: z.number().int().positive(),
+	poolAddress: z.string().min(1),
+	tokenMint: z.string().min(1),
+	creator: z.string().nullish(),
+	triggerSignature: z.string().nullish(),
+	score: z.number().nullish(),
+	predictedMaxHoldS: z.number().int().nullish(),
+	openedAt: isoDate,
+	closedAt: isoDate.nullish(),
+	entrySolLamports: z.number().int().nonnegative(),
+	exitSolLamports: z.number().int().nullish(),
+	pnlLamports: z.number().int().nullish(),
+	pnlPct: z.number().nullish(),
+	status: z.enum(['open', 'closed', 'reserved']).default('open'),
+	exitReason: z.string().nullish(),
+	tokenName: z.string().nullish(),
+	tokenSymbol: z.string().nullish(),
+	imageUri: z.string().nullish()
+});
+export type PumpRiderPositionUpsert = z.infer<typeof pumpRiderPositionUpsertSchema>;
+
+export const pumpRiderBatchSchema = z.object({
+	positions: z.array(pumpRiderPositionUpsertSchema).max(500)
+});
+export type PumpRiderBatch = z.infer<typeof pumpRiderBatchSchema>;
