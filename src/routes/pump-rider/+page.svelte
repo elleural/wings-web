@@ -141,30 +141,42 @@
 	const POSITION_LP = $derived(data.positionSizeLamports ?? 167_000_000);
 	const POSITION_USD = $derived(((POSITION_LP / 1e9) * data.solUsd));
 
-	// Hypothetical net for a missed opp = TP fires at +100% on POSITION_LP,
-	// fees = 1% per leg on entry + (entry+pnl) → ≈ 3% drag, so net ≈ +97% on entry $.
-	function missedNetUsd(peakPdaLamports: number | string | null | undefined): number {
+	// Constant-product price gain at peak: pump.fun curve has virtual_sol=30,
+	// virtual_token=k/30, so price ratio at real_sol=R is (30+R)² / 900.
+	// This is the *theoretical max* gain — what we'd realize if we held to
+	// peak with perfect timing. Real strategy caps at +100% TP, but the
+	// "missed opportunity" headline is the wave we let pass, uncapped.
+	function peakGainFraction(peakPdaLamports: number | string | null | undefined): number {
 		const peak = Number(peakPdaLamports ?? 0);
-		// Only counts as a missed TP if peak ≥ 19 SOL (== +100% would have fired).
-		if (!Number.isFinite(peak) || peak < 19_000_000_000) return 0;
-		const entryLp = POSITION_LP;
-		// Gross PnL at TP = +100% on entry → +entryLp.
-		const grossPnlLp = entryLp;
-		// Fees: 1% on entry leg + 1% on (entry + grossPnl) exit leg
-		const entryFeeLp = (entryLp * data.feeBps) / 10000;
-		const exitFeeLp = ((entryLp + grossPnlLp) * data.feeBps) / 10000;
-		const netLp = grossPnlLp - entryFeeLp - exitFeeLp;
-		return (netLp / 1e9) * data.solUsd;
+		if (!Number.isFinite(peak) || peak <= 0) return 0;
+		const peakSol = peak / 1e9;
+		return ((30 + peakSol) ** 2) / 900 - 1;
+	}
+
+	function missedGrossUsd(peakPdaLamports: number | string | null | undefined): number {
+		const gain = peakGainFraction(peakPdaLamports);
+		if (gain <= 0) return 0;
+		return ((POSITION_LP * gain) / 1e9) * data.solUsd;
 	}
 
 	function missedFeeUsd(peakPdaLamports: number | string | null | undefined): number {
-		const peak = Number(peakPdaLamports ?? 0);
-		if (!Number.isFinite(peak) || peak < 19_000_000_000) return 0;
+		const gain = peakGainFraction(peakPdaLamports);
+		if (gain <= 0) return 0;
 		const entryLp = POSITION_LP;
+		const exitLp = entryLp * (1 + gain);
 		const entryFeeLp = (entryLp * data.feeBps) / 10000;
-		const exitFeeLp = ((entryLp + entryLp) * data.feeBps) / 10000; // entry+gross
+		const exitFeeLp = (exitLp * data.feeBps) / 10000;
 		return ((entryFeeLp + exitFeeLp) / 1e9) * data.solUsd;
 	}
+
+	function missedNetUsd(peakPdaLamports: number | string | null | undefined): number {
+		return missedGrossUsd(peakPdaLamports) - missedFeeUsd(peakPdaLamports);
+	}
+
+	// Drop rows where peak never crossed our +100% TP threshold (~12.4 SOL
+	// real_sol — using 19 SOL as conservative cutoff, same as the push
+	// query). These wouldn't have been wins under our strategy.
+	const MIN_TP_PEAK_LAMPORTS = 19_000_000_000;
 
 	// Sorted derivations
 	const sortedRecent = $derived.by(() => {
@@ -209,7 +221,9 @@
 	});
 
 	const sortedMissed = $derived.by(() => {
-		const arr = [...(data.missed ?? [])];
+		const arr = (data.missed ?? []).filter(
+			(m) => Number(m.peakPdaLamports ?? 0) >= MIN_TP_PEAK_LAMPORTS
+		);
 		arr.sort((a, b) => {
 			const k = missedSortKey;
 			let av: unknown, bv: unknown;
@@ -433,7 +447,7 @@
 				{@render th('issuerSol', 'Issuer made', true, 'Net SOL the issuer extracted')}
 				{@render th('inUsd', '$ in', true, 'USD we would have spent on entry')}
 				{@render th('feeUsd', 'Fees', true, 'Estimated 1%/leg pump.fun fees')}
-				{@render th('netUsd', 'Net missed $', true, `Hypothetical net after fees on a $${POSITION_USD.toFixed(0)} position if TP fired`)}
+				{@render th('netUsd', 'Net missed $', true, `If we had entered at $${POSITION_USD.toFixed(0)} and held to peak, gross gain (uncapped by TP) minus 1%/leg fees`)}
 			</tr>
 		</thead>
 		<tbody class="divide-y divide-(--color-border)">
@@ -460,10 +474,10 @@
 					</td>
 					<td class="px-3 py-2 mono text-xs num text-right">${POSITION_USD.toFixed(2)}</td>
 					<td class="px-3 py-2 mono text-xs num text-right text-(--color-fg-muted)">
-						{fee > 0 ? `-$${fee.toFixed(2)}` : '—'}
+						-${fee.toFixed(2)}
 					</td>
 					<td class="px-3 py-2 mono text-xs num text-right {pnlClass(net)}">
-						{net > 0 ? `+$${net.toFixed(2)}` : net < 0 ? `-$${Math.abs(net).toFixed(2)}` : '—'}
+						+${net.toFixed(2)}
 					</td>
 				</tr>
 			{:else}
