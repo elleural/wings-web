@@ -4,6 +4,9 @@
 
 	let { data }: PageProps = $props();
 
+	// Tab state — default to 'recent', toggle to 'missed'
+	let activeTab: 'recent' | 'missed' = $state('recent');
+
 	function lpToSol(v: number | string | null | undefined): number {
 		if (v == null) return 0;
 		const n = typeof v === 'string' ? Number(v) : v;
@@ -226,13 +229,42 @@
 	</table>
 </div>
 
+<!-- Tab switcher -->
+<div class="flex gap-2 mb-4 border-b border-(--color-border)">
+	<button
+		type="button"
+		onclick={() => (activeTab = 'recent')}
+		class={[
+			'px-4 py-2 text-sm uppercase tracking-wider transition-colors -mb-px',
+			activeTab === 'recent'
+				? 'text-(--color-fg) border-b-2 border-(--color-accent) font-medium'
+				: 'text-(--color-fg-muted) hover:text-(--color-fg) border-b-2 border-transparent'
+		].join(' ')}
+	>
+		Recent closes
+		<span class="ml-2 text-xs normal-case tracking-normal text-(--color-fg-muted)">
+			({data.recent.length})
+		</span>
+	</button>
+	<button
+		type="button"
+		onclick={() => (activeTab = 'missed')}
+		class={[
+			'px-4 py-2 text-sm uppercase tracking-wider transition-colors -mb-px',
+			activeTab === 'missed'
+				? 'text-(--color-fg) border-b-2 border-(--color-accent) font-medium'
+				: 'text-(--color-fg-muted) hover:text-(--color-fg) border-b-2 border-transparent'
+		].join(' ')}
+	>
+		Missed opportunities
+		<span class="ml-2 text-xs normal-case tracking-normal text-(--color-fg-muted)">
+			({data.missed.length}) — skipped by classifier, ended up profitable
+		</span>
+	</button>
+</div>
+
 <!-- Missed opportunities -->
-<h2 class="text-sm uppercase tracking-wider text-(--color-fg-muted) mb-2">
-	Missed opportunities ({data.missed.length})
-	<span class="text-xs normal-case tracking-normal text-(--color-fg-muted) ml-2">
-		— skipped by classifier, ended up profitable
-	</span>
-</h2>
+{#if activeTab === 'missed'}
 <div class="rounded-md border border-(--color-border) bg-(--color-bg-card) overflow-x-auto mb-8">
 	<table class="w-full text-sm">
 		<thead class="bg-(--color-bg-elev) text-xs uppercase tracking-wider text-(--color-fg-muted)">
@@ -281,8 +313,10 @@
 	</table>
 </div>
 
+{/if}
+
 <!-- Recent closes -->
-<h2 class="text-sm uppercase tracking-wider text-(--color-fg-muted) mb-2">Recent closes (last 50)</h2>
+{#if activeTab === 'recent'}
 <div class="rounded-md border border-(--color-border) bg-(--color-bg-card) overflow-x-auto">
 	<table class="w-full text-sm">
 		<thead class="bg-(--color-bg-elev) text-xs uppercase tracking-wider text-(--color-fg-muted)">
@@ -346,3 +380,4 @@
 		</tbody>
 	</table>
 </div>
+{/if}
