@@ -11,6 +11,7 @@
 		{ href: '/', label: 'overview' },
 		{ href: '/positions', label: 'positions' },
 		{ href: '/pump-rider', label: 'pump-rider' },
+		{ href: '/a3-dlmm', label: 'a3-dlmm' },
 		{ href: '/decisions', label: 'decisions' },
 		{ href: '/fills', label: 'fills' },
 		{ href: '/strategies', label: 'strategies' },
